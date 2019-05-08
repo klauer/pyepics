@@ -66,72 +66,6 @@ def _ensure_context(func):
     return wrapped
 
 
-def get_pv(pvname, form='time', connect=False, context=None, timeout=5.0,
-           connection_callback=None, access_callback=None, callback=None,
-           **kwargs):
-    """
-    Get a PV from PV cache or create one if needed.
-
-    Parameters
-    ---------
-    form : str, optional
-        PV form: one of 'native', 'time' (default), 'ctrl'
-    connect : bool, optional
-        whether to wait for connection (default False)
-    context : int, optional
-        PV threading context (defaults to current context)
-    timeout : float, optional
-        connection timeout, in seconds (default 5.0)
-    connection_callback : callable, optional
-        Called upon connection with keyword arguments: pvname, conn, pv
-    access_callback : callable, optional
-        Called upon update to access rights with the following signature:
-        access_callback(read_access, write_access, pv=epics.PV)
-    callback : callable, optional
-        Called upon update to change of value.  See `epics.PV.run_callback` for
-        further information regarding the signature.
-    """
-
-    if form not in ('native', 'time', 'ctrl'):
-        form = 'native'
-
-    thispv = None
-    if context is None:
-        context = ca.initial_context
-        if context is None:
-            context = ca.current_context()
-
-    thispv = _PVcache_[context][pvname].get(form, None)
-
-    if thispv is None:
-        # not cached -- create pv (automatically saved to cache)
-        thispv = PV(pvname, form=form, callback=callback,
-                    connection_callback=connection_callback,
-                    access_callback=access_callback,
-                    connection_timeout=timeout, **kwargs)
-    else:
-        if connection_callback is not None:
-            if thispv.connected:
-                connection_callback(pvname=thispv.pvname,
-                                    conn=thispv.connected, pv=thispv)
-            thispv.connection_callbacks.append(connection_callback)
-
-        if access_callback is not None:
-            if thispv.connected:
-                access_callback(thispv.read_access, thispv.write_access,
-                                pv=thispv)
-            thispv.access_callbacks.append(access_callback)
-
-        if callback is not None:
-            idx = thispv.add_callback(callback)
-            thispv.run_callback(idx)
-
-    if connect:
-        if not thispv.wait_for_connection(timeout=timeout):
-            ca.write('cannot connect to %s' % pvname)
-    return thispv
-
-
 def fmt_time(tstamp=None):
     "simple formatter for time values"
     if tstamp is None:
@@ -142,7 +76,7 @@ def fmt_time(tstamp=None):
                          round(1.e5*frac))
 
 
-class PV(object):
+class _PV(object):
     """Epics Process Variable
 
     A PV encapsulates an Epics Process Variable.
@@ -172,12 +106,16 @@ class PV(object):
                'lower_alarm_limit', 'lower_warning_limit',
                'upper_warning_limit', 'upper_ctrl_limit', 'lower_ctrl_limit')
 
-    def __init__(self, pvname, callback=None, form='time',
-                 verbose=False, auto_monitor=None, count= None,
-                 connection_callback=None,
-                 connection_timeout=None,
-                 access_callback=None):
+    # def __init__(self, pvname, callback=None, form='time', verbose=False,
+    #              auto_monitor=None, count=None, connection_callback=None,
+    #              connection_timeout=None, access_callback=None, **kwargs):
 
+    @classmethod
+    def _create(cls, pvname, callback=None, form='time', verbose=False,
+                auto_monitor=None, count=None, connection_callback=None,
+                connection_timeout=None, access_callback=None, **kwargs):
+        self = object.__new__(cls)
+        # calling it self to minimize the diff for now
         self.pvname     = pvname.strip()
         self.form       = form.lower()
         self.verbose    = verbose
@@ -231,10 +169,7 @@ class PV(object):
                                       use_ctrl= self.form == 'ctrl',
                                       use_time= self.form == 'time')
         self._args['type'] = dbr.Name(self.ftype).lower()
-
-        cache = _PVcache_[self.context][pvname]
-        if form not in cache:
-            cache[form] = self
+        return self
 
     @_ensure_context
     def force_connect(self, pvname=None, chid=None, conn=True, **kws):
@@ -1109,3 +1044,95 @@ class PV(object):
             self.disconnect()
         except:
             pass
+
+
+class PV(_PV):
+    def __new__(cls, pvname, form='time', connect=False, context=None,
+                timeout=5.0, connection_callback=None, access_callback=None,
+                callback=None, **kwargs):
+
+        if form not in ('native', 'time', 'ctrl'):
+            form = 'native'
+
+        thispv = None
+        if context is None:
+            context = ca.initial_context
+            if context is None:
+                context = ca.current_context()
+
+        thispv = _PVcache_[context][pvname].get(form, None)
+
+        if thispv is None:
+            # not cached -- create pv (automatically saved to cache)
+
+            # (1) can't overwrite __init__ and stop it from being called again
+            #     unless subclasses are modified
+            # _PVcache_[context][pvname][form] = thispv = object.__new__(cls)
+            # thispv.__init__(
+            #     pvname, form=form, callback=callback,
+            #     connection_callback=connection_callback,
+            #     access_callback=access_callback, connection_timeout=timeout,
+            #     **kwargs)
+            _PVcache_[context][pvname][form] = thispv = cls._create(
+                pvname, form=form, callback=callback,
+                connection_callback=connection_callback,
+                access_callback=access_callback, connection_timeout=timeout,
+                **kwargs)
+        else:
+            if connection_callback is not None:
+                if thispv.connected:
+                    connection_callback(pvname=thispv.pvname,
+                                        conn=thispv.connected, pv=thispv)
+                thispv.connection_callbacks.append(connection_callback)
+
+            if access_callback is not None:
+                if thispv.connected:
+                    access_callback(thispv.read_access, thispv.write_access,
+                                    pv=thispv)
+                thispv.access_callbacks.append(access_callback)
+
+            if callback is not None:
+                idx = thispv.add_callback(callback)
+                thispv.run_callback(idx)
+
+        if connect:
+            if not thispv.wait_for_connection(timeout=timeout):
+                ca.write('cannot connect to %s' % pvname)
+        return thispv
+
+
+class MyPVSubclass(PV):
+    def __init__(self, pvname, **kwargs):
+        super().__init__(pvname, **kwargs)
+        print('init')
+        # This will break :(
+
+
+def get_pv(pvname, form='time', connect=False, context=None, timeout=5.0,
+           connection_callback=None, access_callback=None, callback=None,
+           **kwargs):
+    """
+    Get a PV from PV cache or create one if needed.
+
+    Parameters
+    ---------
+    form : str, optional
+        PV form: one of 'native', 'time' (default), 'ctrl'
+    connect : bool, optional
+        whether to wait for connection (default False)
+    context : int, optional
+        PV threading context (defaults to current context)
+    timeout : float, optional
+        connection timeout, in seconds (default 5.0)
+    connection_callback : callable, optional
+        Called upon connection with keyword arguments: pvname, conn, pv
+    access_callback : callable, optional
+        Called upon update to access rights with the following signature:
+        access_callback(read_access, write_access, pv=epics.PV)
+    callback : callable, optional
+        Called upon update to change of value.  See `epics.PV.run_callback` for
+        further information regarding the signature.
+    """
+    return PV(pvname, form=form, connect=connect, context=context,
+              timeout=timeout, connection_callback=connection_callback,
+              access_callback=access_callback, callback=callback, **kwargs)
