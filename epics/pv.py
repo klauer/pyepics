@@ -10,6 +10,8 @@ import time
 import ctypes
 import copy
 import functools
+
+from collections import defaultdict
 from math import log10
 
 from . import ca
@@ -21,7 +23,10 @@ try:
 except ImportError:
     from argparse import Namespace
 
-_PVcache_ = {}
+
+# Cache of epics.PV instances:
+#  _PVcache_[context][pvname][form] = PV
+_PVcache_ = defaultdict(lambda: defaultdict(dict))
 
 
 def _ensure_context(func):
@@ -96,7 +101,7 @@ def get_pv(pvname, form='time', connect=False, context=None, timeout=5.0,
         if context is None:
             context = ca.current_context()
 
-    thispv = _PVcache_.get((pvname, form, context), None)
+    thispv = _PVcache_[context][pvname].get(form, None)
 
     if thispv is None:
         # not cached -- create pv (automatically saved to cache)
@@ -227,9 +232,9 @@ class PV(object):
                                       use_time= self.form == 'time')
         self._args['type'] = dbr.Name(self.ftype).lower()
 
-        pvid = (self.pvname, self.form, self.context)
-        if pvid not in _PVcache_:
-            _PVcache_[pvid] = self
+        cache = _PVcache_[self.context][pvname]
+        if form not in cache:
+            cache[form] = self
 
     @_ensure_context
     def force_connect(self, pvname=None, chid=None, conn=True, **kws):
@@ -1063,20 +1068,33 @@ class PV(object):
         "disconnect PV"
         self.connected = False
 
-        ctx = ca.current_context()
-        pvid = (self.pvname, self.form, ctx)
-        if pvid in _PVcache_:
-            _PVcache_.pop(pvid)
+        if self.chid is None:
+            return
 
-        cache_item = ca._cache[ctx].pop(self.pvname, None)
+        ctx = ca.current_context()
+        pv_cache = _PVcache_[ctx][self.pvname]
+        pv_cache.pop(self.form, None)
+
+        ca_cache = ca._cache[ctx]
+
+        if pv_cache:
+            # Other forms of the same PV may access the same chid; do not
+            # remove it yet.
+            cache_item = ca_cache.get(self.pvname, None)
+        else:
+            # No other forms of the same PV exist; remove it from the cache.
+            cache_item = ca_cache.pop(self.pvname, None)
+
         if cache_item is not None:
             if self._monref is not None:
                 # atexit may have already cleared the subscription
                 self._clear_auto_monitor_subscription()
 
-            # TODO: clear channel should be called as well
-            # ca.clear_channel(cache_item.chid)
+        # TODO: clear channel should be called as well
+        # if not pv_cache:
+        #     ca.clear_channel(self.chid)
 
+        self.chid = None
         self._monref = None
         self._monref_mask = None
         self.clear_callbacks()

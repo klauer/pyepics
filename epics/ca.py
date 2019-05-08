@@ -475,7 +475,7 @@ def clear_cache():
 
     # Clear the cache of PVs used by epics.caget()-like functions
     from . import pv
-    pv._PVcache_ = {}
+    pv._PVcache_.clear()
 
     # The old context is copied directly from the old process
     # in systems with proper fork() implementations
