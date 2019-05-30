@@ -422,13 +422,13 @@ def finalize_libca(maxtime=10.0):
         flush_io()
         poll()
         for ctxid, ctx in _cache.items():
-            for pvname, info in ctx.items():
-                if isinstance(pvname, int):
-                    continue
-
-                if info.chid is not None:
-                    print('clearing', info.chid, name(info.chid))
-                    libca.ca_clear_channel(info.chid)
+            for chid, entry in list(ctx.items()):
+                if isinstance(chid, int):
+                    try:
+                        print('clearing chid', chid, name(chid))
+                        clear_channel(chid)
+                    except ChannelAccessException:
+                        pass
             ctx.clear()
         _cache.clear()
         flush_count = 0
