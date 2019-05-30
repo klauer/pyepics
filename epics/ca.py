@@ -462,9 +462,18 @@ def _get_or_create_cache_item_by_chid(chid):
     -------
     item : _CacheItem
         The _CacheItem for the chid
+
+    Raises
+    ------
+    ChannelAccessException
+        If chid is invalid or there is no context
     '''
-    context_cache = _cache[current_context()]
+    context = current_context()
+    if context is None:
+        raise ChannelAccessException('No CA context')
+
     pvname = name(chid)
+    context_cache = _cache[context]
     try:
         return context_cache[pvname]
     except KeyError:
