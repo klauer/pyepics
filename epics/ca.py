@@ -78,6 +78,7 @@ DEFAULT_CONNECTION_TIMEOUT = 2.0
 ## Cache of existing channel IDs:
 # Keyed on context, then on pv name (e.g., _cache[ctx][pvname])
 _cache = collections.defaultdict(dict)
+_chid_cache = {}
 
 # Puts with completion in progress:
 _put_completes = []
@@ -155,6 +156,7 @@ class _CacheItem:
 
     def __init__(self, chid, pvname, callbacks=None, ts=0):
         self._chid = None
+        self.context = current_context()
         self.lock = threading.RLock()
         self.conn = False
         self.pvname = pvname
@@ -184,7 +186,7 @@ class _CacheItem:
             if old_chid.value == chid.value:
                 return
 
-            _cache[current_context()].pop(old_chid.value)
+            _chid_cache.pop(old_chid.value, None)
 
         self._chid = chid
 
@@ -421,16 +423,16 @@ def finalize_libca(maxtime=10.0):
         start_time = time.time()
         flush_io()
         poll()
-        for ctxid, ctx in _cache.items():
-            for chid, entry in list(ctx.items()):
-                if isinstance(chid, int):
-                    try:
-                        print('clearing chid', chid, name(chid))
-                        clear_channel(chid)
-                    except ChannelAccessException:
-                        pass
-            ctx.clear()
+        for chid, entry in list(_chid_cache.items()):
+            try:
+                print('clearing chid', chid, name(chid))
+                clear_channel(chid)
+            except ChannelAccessException:
+                pass
+
+        _chid_cache.clear()
         _cache.clear()
+
         flush_count = 0
         while (flush_count < 5 and
                time.time()-start_time < maxtime):
@@ -517,6 +519,7 @@ def clear_cache():
 
     # Clear global state variables
     _cache.clear()
+    _chid_cache.clear()
 
     # Clear the cache of PVs used by epics.caget()-like functions
     from . import pv
@@ -579,7 +582,7 @@ def withCHID(fcn):
                     (fcn.__name__, chid, type(chid), args, kwds))
                 raise ChannelAccessException(msg)
             cache = _cache[current_context()]
-            if chid.value not in cache:
+            if chid.value not in _chid_cache:
                 print('unexpected chid', chid.value, chid, cache)
                 raise ChannelAccessException('Unexpected channel ID')
         return fcn(*args, **kwds)
@@ -756,9 +759,13 @@ def _onPutEvent(args, **kwds):
 
 def _onAccessRightsEvent(args):
     'Access rights callback'
-    entry = _get_or_create_cache_item_by_chid(args.chid)
-    entry.run_access_event_callbacks(
-        bool(args.read_access), bool(args.write_access))
+    # NOTE: Access rights events may not happen in a CA context
+    # This means get_cache(name(chid)) will not work, as the pv name cache is
+    # first keyed on context.
+    entry = _chid_cache.get(_chid_to_int(args.chid), None)
+    if entry is not None:
+        entry.run_access_event_callbacks(
+            bool(args.read_access), bool(args.write_access))
 
 
 # create global reference to these callbacks
@@ -986,7 +993,7 @@ def create_channel(pvname, connect=False, auto_cb=True, callback=None):
             PySEVCHK('create_channel', ret)
 
             entry.chid = chid
-            context_cache[chid.value] = entry
+            _chid_cache[chid.value] = entry
 
     elif callable(callback) and callback not in entry.callbacks:
         entry.callbacks.append(callback)
@@ -1122,7 +1129,7 @@ def clear_channel(chid):
     "clear the channel"
     context_cache = _cache[current_context()]
     context_cache.pop(name(chid), None)
-    context_cache.pop(chid.value, None)
+    _chid_cache.pop(chid.value, None)
     return libca.ca_clear_channel(chid)
 
 @withCHID
