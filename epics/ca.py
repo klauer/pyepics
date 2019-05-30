@@ -192,13 +192,14 @@ class _CacheItem:
 
     def __repr__(self):
         return (
-            '<{} {!r} {} failures={} callbacks={} access_callbacks={}>'
+            '<{} {!r} {} failures={} callbacks={} access_callbacks={} chid={}>'
             ''.format(self.__class__.__name__,
                       repr(self.pvname),
                       'connected' if self.conn else 'disconnected',
                       self.failures,
                       len(self.callbacks),
-                      len(self.access_event_callback)
+                      len(self.access_event_callback),
+                      self.chid_int,
                       )
         )
 
@@ -237,7 +238,7 @@ class _CacheItem:
         timestamp : float
             The event timestamp
         '''
-        print('conn callback chid is', self.chid.value)
+        print('conn callback chid is', chid.value)
         with self.lock:
             self.chid = chid
             self.conn = conn
@@ -477,11 +478,12 @@ def _get_or_create_cache_item_by_chid(chid):
         The _CacheItem for the chid
     '''
     context_cache = _cache[current_context()]
+    chid_int = _chid_to_int(chid)
     try:
         return context_cache[chid]
     except KeyError:
-        context_cache[chid] = _CacheItem(chid=chid, pvname=name(chid))
-        return context_cache[chid]
+        context_cache[chid_int] = _CacheItem(chid=chid, pvname=name(chid))
+        return context_cache[chid_int]
 
 
 def show_cache(print_out=True):
@@ -708,7 +710,7 @@ def _onMonitorEvent(args):
 def _onConnectionEvent(args):
     "Connection notification - run user callbacks"
     entry = _get_or_create_cache_item_by_chid(args.chid)
-    entry.run_connection_callbacks(ctypes.c_long(args.chid),
+    entry.run_connection_callbacks(dbr.chid_t(args.chid),
                                    conn=(args.op == dbr.OP_CONN_UP),
                                    timestamp=time.time())
 
