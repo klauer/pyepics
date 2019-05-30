@@ -439,7 +439,8 @@ def finalize_libca(maxtime=10.0):
             flush_count += 1
         context_destroy()
         libca = None
-    except Exception:
+    except:
+        print('catch-all for exceptions', sys.exc_info())
         pass
     time.sleep(0.01)
 
