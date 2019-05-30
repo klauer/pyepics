@@ -176,6 +176,9 @@ class _CacheItem:
 
     @chid.setter
     def chid(self, chid):
+        if isinstance(chid, int):
+            chid = dbr.chid_t(chid)
+
         old_chid = self._chid
         if old_chid is not None:
             if old_chid.value == chid.value:
@@ -977,7 +980,8 @@ def create_channel(pvname, connect=False, auto_cb=True, callback=None):
         if chid is None:
             chid = dbr.chid_t()
             ret = libca.ca_create_channel(ctypes.c_char_p(STR2BYTES(pvname)),
-                                          _CB_CONNECT, 0, 0, ctypes.byref(chid))
+                                          _CB_CONNECT, 0, 0, ctypes.byref(chid)
+                                          )
             PySEVCHK('create_channel', ret)
             entry.chid = chid
 
