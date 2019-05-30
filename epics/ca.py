@@ -571,7 +571,7 @@ def withCHID(fcn):
             cache = _cache[current_context()]
             if chid.value not in cache:
                 print('unexpected chid', chid.value, chid, cache)
-                # raise ChannelAccessException('Unexpected channel ID')
+                raise ChannelAccessException('Unexpected channel ID')
         return fcn(*args, **kwds)
     return wrapper
 
