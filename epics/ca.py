@@ -985,6 +985,8 @@ def create_channel(pvname, connect=False, auto_cb=True, callback=None):
                                           _CB_CONNECT, 0, 0, ctypes.byref(chid)
                                           )
             PySEVCHK('create_channel', ret)
+            # Ensure the chid is set prior to returning (the connection
+            # callback may or may not have set it at this point)
             entry.chid = chid
 
     if connect:
