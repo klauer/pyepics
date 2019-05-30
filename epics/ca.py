@@ -695,7 +695,13 @@ def _onMonitorEvent(args):
 ## connection event handler:
 def _onConnectionEvent(args):
     "Connection notification - run user callbacks"
-    entry = _get_or_create_cache_item_by_chid(args.chid)
+    try:
+        entry = _get_or_create_cache_item_by_chid(args.chid)
+    except ChannelAccessException:
+        # During teardown, disconnection callbacks may try to create a new
+        # cache item
+        return
+
     entry.run_connection_callbacks(dbr.chid_t(args.chid),
                                    conn=(args.op == dbr.OP_CONN_UP),
                                    timestamp=time.time())
