@@ -1104,7 +1104,9 @@ def field_type(chid):
 @withCHID
 def clear_channel(chid):
     "clear the channel"
-    _cache[current_context()].pop(name(chid), None)
+    context_cache = _cache[current_context()]
+    context_cache.pop(name(chid), None)
+    context_cache.pop(chid.value, None)
     return libca.ca_clear_channel(chid)
 
 @withCHID
