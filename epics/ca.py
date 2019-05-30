@@ -187,8 +187,6 @@ class _CacheItem:
             _cache[current_context()].pop(old_chid.value)
 
         self._chid = chid
-        if chid is not None:
-            _cache[current_context()][chid.value] = self
 
     def __repr__(self):
         return (
@@ -451,18 +449,6 @@ def get_cache(pvname):
     return _cache[current_context()].get(pvname, None)
 
 
-def _get_or_create_cache_item_by_pvname(pvname, chid=None):
-    '''
-    Return the current _CacheItem for a given pvname, or create a new one
-    '''
-    context_cache = _cache[current_context()]
-    try:
-        return context_cache[pvname]
-    except KeyError:
-        context_cache[pvname] = _CacheItem(chid=chid, pvname=pvname)
-        return context_cache[pvname]
-
-
 def _get_or_create_cache_item_by_chid(chid):
     '''
     Return the current _CacheItem for a given chid, or create a new one
@@ -478,12 +464,12 @@ def _get_or_create_cache_item_by_chid(chid):
         The _CacheItem for the chid
     '''
     context_cache = _cache[current_context()]
-    chid_int = _chid_to_int(chid)
+    pvname = name(chid)
     try:
-        return context_cache[chid]
+        return context_cache[pvname]
     except KeyError:
-        context_cache[chid_int] = _CacheItem(chid=chid, pvname=name(chid))
-        return context_cache[chid_int]
+        context_cache[pvname] = _CacheItem(chid=chid, pvname=pvname)
+        return context_cache[pvname]
 
 
 def show_cache(print_out=True):
@@ -970,28 +956,31 @@ def create_channel(pvname, connect=False, auto_cb=True, callback=None):
     # a reference to _onConnectionEvent:  This is really the connection
     # callback that is run -- the callack here is stored in the _cache
     # and called by _onConnectionEvent.
-    entry = _get_or_create_cache_item_by_pvname(pvname=pvname, chid=None)
-    if callable(callback) and callback not in entry.callbacks:
-        entry.callbacks.append(callback)
-        if entry.chid is not None and entry.conn:
-            callback(chid=_chid_to_int(entry.chid), pvname=pvname,
-                     conn=entry.conn)
+    entry = get_cache(pvname)
+    if entry is None:
+        entry = _CacheItem(chid=None, pvname=pvname, callbacks=[callback])
+        context_cache = _cache[current_context()]
+        context_cache[pvname] = entry
 
-    with entry.lock:
-        chid = entry.chid
-        if chid is None:
+        with entry.lock:
             chid = dbr.chid_t()
             ret = libca.ca_create_channel(ctypes.c_char_p(STR2BYTES(pvname)),
                                           _CB_CONNECT, 0, 0, ctypes.byref(chid)
                                           )
             PySEVCHK('create_channel', ret)
-            # Ensure the chid is set prior to returning (the connection
-            # callback may or may not have set it at this point)
+
             entry.chid = chid
+            context_cache[chid.value] = entry
+
+    elif callable(callback) and callback not in entry.callbacks:
+        entry.callbacks.append(callback)
+        if entry.chid is not None and entry.conn:
+            callback(chid=_chid_to_int(entry.chid), pvname=pvname,
+                     conn=entry.conn)
 
     if connect:
-        connect_channel(chid)
-    return chid
+        connect_channel(entry.chid)
+    return entry.chid
 
 @withCHID
 def connect_channel(chid, timeout=None, verbose=False):
